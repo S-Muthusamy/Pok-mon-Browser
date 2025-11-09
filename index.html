@@ -1,0 +1,343 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Pokémon Browser</title>
+  <link rel="icon" href="pokemon-icon.png" type="image/png">
+
+  <style>
+    :root {
+      --bg-dark: #0b1020;
+      --bg-card: #161b33;
+      --bg-row: #1b2144;
+      --accent: #4e6ef2;
+      --accent-hover: #6d85ff;
+      --border: #27326d;
+      --text-main: #f2f4ff;
+      --text-muted: #a8b2d1;
+      font-family: "Inter", system-ui, -apple-system, "Segoe UI", Roboto, Arial, sans-serif;
+    }
+
+    body {
+      margin: 0;
+      background: linear-gradient(180deg, #0b1020 0%, #141a36 100%);
+      color: var(--text-main);
+      min-height: 100vh;
+    }
+
+    .app {
+      max-width: 920px;
+      margin: 0 auto;
+      padding: 28px 20px;
+    }
+
+    h1 {
+      text-align: center;
+      font-size: 32px;
+      margin-bottom: 24px;
+      letter-spacing: 0.5px;
+      color: var(--accent);
+      text-shadow: 0 0 10px rgba(78, 110, 242, 0.2);
+    }
+
+    .card {
+      background: var(--bg-card);
+      border: 1px solid var(--border);
+      border-radius: 20px;
+      padding: 20px;
+      box-shadow: 0 10px 25px rgba(0, 0, 0, 0.3);
+    }
+
+    .toolbar {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      flex-wrap: wrap;
+      gap: 12px;
+      margin-bottom: 20px;
+    }
+
+    .pager {
+      display: flex;
+      gap: 8px;
+      align-items: center;
+    }
+
+    button {
+      background: var(--accent);
+      color: #fff;
+      border: none;
+      border-radius: 10px;
+      padding: 10px 16px;
+      font-weight: 600;
+      cursor: pointer;
+      transition: background 0.2s ease, transform 0.1s ease;
+    }
+
+    button:hover:not([disabled]) {
+      background: var(--accent-hover);
+      transform: translateY(-1px);
+    }
+
+    button[disabled] {
+      opacity: 0.6;
+      cursor: not-allowed;
+    }
+
+    .list {
+      display: grid;
+      grid-template-columns: 1fr;
+      gap: 14px;
+    }
+
+    @media (min-width: 640px) {
+      .list {
+        grid-template-columns: 1fr 1fr;
+      }
+    }
+
+    .row {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      background: var(--bg-row);
+      border: 1px solid var(--border);
+      border-radius: 14px;
+      padding: 14px 16px;
+      transition: transform 0.15s ease, box-shadow 0.15s ease;
+    }
+
+    .row:hover {
+      transform: scale(1.02);
+      box-shadow: 0 6px 14px rgba(0, 0, 0, 0.3);
+    }
+
+    .name {
+      text-transform: capitalize;
+      font-weight: 600;
+      letter-spacing: 0.3px;
+    }
+
+    .details {
+      margin-top: 10px;
+      padding: 14px;
+      border-radius: 14px;
+      background: rgba(30, 36, 78, 0.8);
+      border: 1px dashed var(--accent);
+      display: flex;
+      gap: 18px;
+      align-items: center;
+      animation: fadeIn 0.3s ease;
+    }
+
+    .details img {
+      width: 72px;
+      height: 72px;
+      image-rendering: pixelated;
+    }
+
+    .muted {
+      color: var(--text-muted);
+    }
+
+    .error {
+      color: #ffb4b4;
+    }
+
+    .footer {
+      text-align: center;
+      margin-top: 20px;
+      font-size: 13px;
+      opacity: 0.7;
+    }
+
+    a {
+      color: var(--accent-hover);
+      text-decoration: none;
+    }
+
+    a:hover {
+      text-decoration: underline;
+    }
+
+    @keyframes fadeIn {
+      from { opacity: 0; transform: translateY(-5px); }
+      to { opacity: 1; transform: translateY(0); }
+    }
+  </style>
+</head>
+
+<body>
+  <main class="app">
+    <h1>Pokémon Browser</h1>
+
+    <div class="card">
+      <div class="toolbar">
+        <div id="status" class="muted" aria-live="polite"></div>
+        <div class="pager">
+          <button id="prevBtn" aria-label="Previous page">◀ Prev</button>
+          <span id="pageLabel" class="muted">Page 1</span>
+          <button id="nextBtn" aria-label="Next page">Next ▶</button>
+        </div>
+      </div>
+
+      <div id="list" class="list"></div>
+    </div>
+
+    <div class="footer">
+      Data from <a href="https://pokeapi.co/" target="_blank" rel="noreferrer">PokéAPI</a>
+    </div>
+  </main>
+
+  <script>
+    const API_BASE = 'https://pokeapi.co/api/v2/pokemon';
+    const PAGE_SIZE = 20;
+
+    let offset = 0;
+    let totalCount = 0;
+    const cache = new Map();
+
+    // elements
+    const listEl = document.getElementById('list');
+    const statusEl = document.getElementById('status');
+    const prevBtn = document.getElementById('prevBtn');
+    const nextBtn = document.getElementById('nextBtn');
+    const pageLbl = document.getElementById('pageLabel');
+
+    // utilities
+    const clamp = (n, min, max) => Math.min(Math.max(n, min), max);
+    const safe = s => String(s).replaceAll('&','&amp;').replaceAll('<','&lt;').replaceAll('>','&gt;');
+
+    // get/set page in URL
+    function getPageFromUrl() {
+      const p = parseInt(new URLSearchParams(location.search).get("page") || "1", 10);
+      return Number.isFinite(p) && p > 0 ? p : 1;
+    }
+    function setPageInUrl(page) {
+      const qs = new URLSearchParams(location.search);
+      qs.set("page", page);
+      history.replaceState(null, "", "?" + qs.toString());
+    }
+
+    // main list
+    async function fetchList() {
+      statusEl.textContent = 'Loading Pokémon list…';
+      listEl.innerHTML = '';
+      try {
+        const url = `${API_BASE}?limit=${PAGE_SIZE}&offset=${offset}`;
+        const res = await fetch(url);
+        if (!res.ok) throw new Error('List fetch failed');
+        const data = await res.json();
+        totalCount = data.count || 0;
+        renderList(data.results || []);
+        statusEl.textContent = `Showing ${data.results.length} of ${totalCount}`;
+      } catch {
+        statusEl.innerHTML = '<span class="error">Error loading list. Try again.</span>';
+      } finally {
+        updatePager();
+      }
+    }
+
+    function renderList(results) {
+      if (!results.length) {
+        listEl.innerHTML = '<div class="muted">No Pokémon found.</div>';
+        return;
+      }
+
+      results.forEach(({ name, url }) => {
+        const container = document.createElement('div');
+        const row = document.createElement('div');
+        row.className = 'row';
+        const nameEl = document.createElement('div');
+        nameEl.className = 'name';
+        nameEl.textContent = name;
+        const btn = document.createElement('button');
+        btn.textContent = 'View Details';
+        btn.setAttribute('aria-expanded','false');
+        row.appendChild(nameEl);
+        row.appendChild(btn);
+        container.appendChild(row);
+        listEl.appendChild(container);
+
+        btn.addEventListener('click', async () => {
+          const expanded = btn.getAttribute('aria-expanded') === 'true';
+          const next = row.nextElementSibling;
+          if (expanded && next && next.classList.contains('details')) {
+            next.remove();
+            btn.setAttribute('aria-expanded','false');
+            return;
+          }
+          const prevText = btn.textContent;
+          btn.disabled = true; btn.textContent = 'Loading…';
+          try {
+            const data = await getDetails(name, url);
+            const sprite = data?.sprites?.front_default || '';
+            const details = document.createElement('div');
+            details.className = 'details';
+            details.innerHTML = `
+              <img src="${sprite}" alt="${safe(data.name)} sprite" onerror="this.style.display='none'">
+              <div>
+                <strong>${safe(data.name)}</strong><br>
+                <span class="muted">ID:</span> ${data.id}<br>
+                <span class="muted">Weight:</span> ${data.weight}
+              </div>`;
+            if (next && next.classList.contains('details')) next.remove();
+            row.after(details);
+            btn.setAttribute('aria-expanded','true');
+          } catch {
+            const errBox = document.createElement('div');
+            errBox.className = 'details';
+            errBox.innerHTML = '<span class="error">Failed to load details.</span>';
+            if (next && next.classList.contains('details')) next.remove();
+            row.after(errBox);
+          } finally {
+            btn.disabled = false; btn.textContent = prevText;
+          }
+        });
+      });
+    }
+
+    async function getDetails(name, fallbackUrl) {
+      if (cache.has(name)) return cache.get(name);
+      let data = null;
+      try {
+        const res = await fetch(`${API_BASE}/${encodeURIComponent(name)}`);
+        if (!res.ok) throw new Error('name fetch fail');
+        data = await res.json();
+      } catch {
+        const res2 = await fetch(fallbackUrl);
+        data = await res2.json();
+      }
+      cache.set(name, data);
+      return data;
+    }
+
+    function updatePager() {
+      const page = Math.floor(offset / PAGE_SIZE) + 1;
+      const totalPages = totalCount ? Math.ceil(totalCount / PAGE_SIZE) : 1;
+      pageLbl.textContent = `Page ${page} of ${totalPages}`;
+      prevBtn.disabled = offset <= 0;
+      nextBtn.disabled = offset + PAGE_SIZE >= totalCount;
+      setPageInUrl(page);
+    }
+
+    prevBtn.addEventListener('click', () => {
+      if (offset <= 0) return;
+      offset = clamp(offset - PAGE_SIZE, 0, totalCount - PAGE_SIZE);
+      fetchList();
+    });
+
+    nextBtn.addEventListener('click', () => {
+      if (offset + PAGE_SIZE >= totalCount) return;
+      offset = clamp(offset + PAGE_SIZE, 0, totalCount - PAGE_SIZE);
+      fetchList();
+    });
+
+    // load correct page from URL
+    const initialPage = getPageFromUrl();
+    offset = (initialPage - 1) * PAGE_SIZE;
+    fetchList();
+  </script>
+</body>
+</html>
